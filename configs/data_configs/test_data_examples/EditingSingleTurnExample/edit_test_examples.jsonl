@@ -1,0 +1,6 @@
+{"images": ["0.jpg"], "conversations": [{"from": "human", "value": "<image>Change the color of the boots to a deep forest green."}]}
+{"images": ["1.jpg"], "conversations": [{"from": "human", "value": "<image>Add a hat on the dog."}]}
+{"images": ["2.jpg"], "conversations": [{"from": "human", "value": "<image>Remove the dried flowers."}]}
+{"images": ["3.jpg"], "conversations": [{"from": "human", "value": "<image>Change it into winter."}]}
+{"images": ["4.jpg"], "conversations": [{"from": "human", "value": "<image>Delete the tennis racket from the man’s hand."}]}
+{"images": ["5.jpg"], "conversations": [{"from": "human", "value": "<image>Show me this as it would appear in a comic book."}]}

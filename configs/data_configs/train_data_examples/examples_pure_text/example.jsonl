@@ -1,0 +1,31 @@
+{
+    "data": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": {
+              "type": "string",
+              "format": "utf-8",
+              "string": "Who are you?"
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": {
+              "type": "string",
+              "format": "utf-8",
+              "string": "I am ILLUME+, an unifided multimodal large language model who integrates the image understanding, image generation and image editing into one architecture."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  

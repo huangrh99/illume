@@ -1,0 +1,1 @@
+{"images": ["0.png", "1.png"], "conversations": [{"from": "human", "value": "<image>\nPlease edit the image according to the instruction: Make the boots a vibrant red.\n"}, {"from": "gpt", "value": "<image>"}]}

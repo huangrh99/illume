@@ -1,0 +1,26 @@
+{
+    "examples_understanding": {
+      "root": "../configs/data_configs/train_data_examples/examples_understanding",
+      "image_dir": "../configs/data_configs/train_data_examples/examples_understanding/images",
+      "annotation_dir": "../configs/data_configs/train_data_examples/examples_understanding/jsonl_before_tokenizer",
+      "tokenizer_inference": false
+    },
+    "examples_generation": {
+      "root": "../configs/data_configs/train_data_examples/examples_generation",
+      "image_dir": "../configs/data_configs/train_data_examples/examples_generation/images",
+      "annotation_dir": "../configs/data_configs/train_data_examples/examples_generation/jsonl_before_tokenizer",
+      "tokenizer_inference": true
+    },
+    "examples_editing": {
+      "root": "../configs/data_configs/train_data_examples/examples_editing",
+      "image_dir": "../configs/data_configs/train_data_examples/examples_editing/images",
+      "annotation_dir": "../configs/data_configs/train_data_examples/examples_editing/jsonl_before_tokenizer",
+      "tokenizer_inference": true
+    },
+    "examples_text": {
+      "root": "../configs/data_configs/train_data_examples/examples_pure_text",
+      "image_dir": "",
+      "annotation_dir": "../configs/data_configs/train_data_examples/examples_pure_text/",
+      "tokenizer_inference": false
+    }
+  }
