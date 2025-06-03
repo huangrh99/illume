@@ -76,7 +76,7 @@ if __name__ == "__main__":
     output_json = args.output_json
 
     if not os.path.isdir(input_folder):
-        print("Invalid folder path.")
+        print(f"Invalid folder path. {input_folder}")
         exit(1)
 
     # If output_json is not specified, default to 'image_sizes.json' inside the input folder.

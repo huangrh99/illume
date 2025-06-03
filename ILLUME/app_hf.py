@@ -851,7 +851,7 @@ def build_demo(embed_mode):
                     [None, "a smiling child."],
                     [None, "tiger cub playing with soccer ball"],
                     [None, "screenshot from a 16 bit platform game in a lush green landscape"],
-                    [None, "Old car in kandy sri lanka,lake road,flower, bright, sunny, orange sky, photorealistic"],
+                    [None, "Old car in kandy sri lanka,lake road,flower, bright, sunny, orange sky"],
                     [None, "Create a vibrant painting of a tropical beach at sunset."],
                 ], inputs=[imagebox, textbox], label='Image Generation Examples')
 
@@ -915,7 +915,6 @@ def build_demo(embed_mode):
                        [conversation_state, chatbot, textbox, imagebox] + btn_list,
                        queue=False
                        ).then(
-            # http_interleaved_chat_bot,
             http_chat_bot,
             [conversation_state] + parameter_chat_inputs,
             [conversation_state, chatbot] + btn_list,
