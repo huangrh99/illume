@@ -128,9 +128,9 @@ To host your own demo locally, follow these steps:
 # using 🤗 HF format checkpoint.
 cd ILLUME
 python app_hf.py \
---model_name illume-unified-mllm/illume_plus-qwen2_5-3b/ \
---diffusion_decoder_path illume-unified-mllm/dualvitok-sdxl-decoder \
---tokenizer_path illume-unified-mllm/dualvitok  \
+--model_name ILLUME-MLLM/illume_plus-qwen2_5-3b-hf/ \
+--diffusion_decoder_path ILLUME-MLLM/dualvitok-sdxl-decoder \
+--tokenizer_path ILLUME-MLLM/dualvitok  \
 --torch_dtype bf16
 
 # Using the origin format checkpoint.
@@ -224,7 +224,7 @@ python ILLUME/scripts/prepare_llm_with_extended_vision_tokenizer.py \
 
 The training process is configured using `configs/examples/illume_debug/illume_debug.py`.
 **Important:** Before starting the training, please open this configuration file and verify/update the following critical paths and settings:
-*   **Base MLLM Model Path:** Ensure this points to the MLLM prepared in "STEP 2: Prepare mllm" (i.e., your `<PATH_TO_NEW_LLM>`).
+*   **Base MLLM Model Path:** Ensure this points to the MLLM prepared in "STEP 2: Prepare mllm".
 *   **Vision Tokenizer Path:** Set this to the path of your trained DualViTok checkpoint.
 *   **Data Paths:** Confirm that all paths to your training datasets (prepared in "STEP 1: Prepare Data") are correct.
 *   **Output Directory:** Specify the directory where training checkpoints and logs will be saved.
