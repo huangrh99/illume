@@ -16,4 +16,4 @@ def create_logger(logging_dir):
     else:  # dummy logger (does nothing)
         logger = logging.getLogger(__name__)
         logger.addHandler(logging.NullHandler())
-    return loggerc
+    return logger
