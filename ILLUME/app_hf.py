@@ -10,7 +10,6 @@ from PIL import Image
 # --- Add necessary imports from your ILLUME codebase ---
 import torch
 torch.backends.cudnn.allow_tf32 = True
-
 from transformers import LogitsProcessorList, TextIteratorStreamer
 
 from illume.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
