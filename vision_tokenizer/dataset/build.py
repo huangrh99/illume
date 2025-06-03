@@ -19,6 +19,7 @@ from tokenizer.movqgan.image_processing_movqgan import MoVQImageProcessor
 
 class WrapDQVAEImageProcessor:
     def __init__(self, **kwargs):
+        kwargs.update(factor=16)
         self._tf = MoVQImageProcessor(**kwargs)
 
     def __call__(self, image, return_tensors='pt', **kwargs):
