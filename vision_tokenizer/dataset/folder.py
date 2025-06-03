@@ -30,8 +30,7 @@ def find_images_with_pathlib(root_dir):
 
 def read_data_file(file):
     if not os.path.exists(file):
-        print(f"{file} not exist!!!")
-        return []
+        raise RuntimeError(f"{os.path.abspath(file)} not exist!!!")
     if file.endswith('.json'):
         with open(file, 'r') as f:
             list_data_dict = json.load(f)
