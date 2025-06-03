@@ -407,8 +407,8 @@ def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
     # Use tokenizer_image_token for potential image placeholder
     input_ids_list = [tokenizer_image_token(prompt, eval_model.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")]
     pad_token_ids = eval_model.tokenizer.pad_token_id if eval_model.tokenizer.pad_token_id is not None else eval_model.tokenizer.eos_token_id
-    input_ids = pad_sequence(eval_model.tokenizer, input_ids_list, batch_first=True, padding_value=pad_token_ids).to(
-        eval_model.device)
+    input_ids = pad_sequence(eval_model.tokenizer, input_ids_list, 
+                             batch_first=True, padding_value=pad_token_ids).to(eval_model.device)
     attention_masks = input_ids.ne(pad_token_ids).to(eval_model.device)
     logging.info(f"Input IDs shape: {input_ids.shape}")
 
@@ -427,8 +427,7 @@ def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
         conv_uncond.append_message(conv_uncond.roles[1], None)
         unconditional_prompt_str = conv_uncond.get_prompt() + ratio_tag  # Add ratio tag
         print("unconditional_prompt_str", unconditional_prompt_str)
-        unconditional_input_ids = tokenizer_image_token(unconditional_prompt_str,
-                                                        eval_model.tokenizer,
+        unconditional_input_ids = tokenizer_image_token(unconditional_prompt_str, eval_model.tokenizer,
                                                         IMAGE_TOKEN_INDEX, return_tensors="pt")
         unconditional_input_ids = unconditional_input_ids.repeat(input_ids.shape[0], 1)
 
