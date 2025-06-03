@@ -26,7 +26,7 @@ from illume.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATC
 
 from illume.mm_utils import get_anyres_image_grid_shape
 
-from illume.model.utils import safe_check_checkpoint_path, load_state_dict_maybe_zero_3
+from illume.model.utils import load_state_dict_maybe_zero_3
 from illume.utils import rank0_print, local_rank
 
 from ..utils import get_state_maybe_zero_3, dicts_equal
@@ -132,7 +132,6 @@ class IllumeMetaModel:
                 p.requires_grad = True
 
         if pretrain_mm_mlp_adapter is not None:
-            pretrain_mm_mlp_adapter = safe_check_checkpoint_path(pretrain_mm_mlp_adapter)
             mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
 
             def get_w(weights, keyword):
@@ -146,7 +145,6 @@ class IllumeMetaModel:
             print(f"State keys: {mm_projector_state.keys()}", file=open(msg_path, 'a'))
 
         if pretrain_trainables is not None:
-            pretrain_trainables = safe_check_checkpoint_path(pretrain_trainables)
             pretrain_trainable_weights = torch.load(pretrain_trainables, map_location='cpu')
 
             def get_w2(weights, keyword):
@@ -271,11 +269,11 @@ class IllumeMetaForCausalLM(ABC):
             semantic_sizes = [h * w for (h, w), _ in image_feature_shapes]
             pixel_sizes = [h * w for _, (h, w) in image_feature_shapes]
 
-            # 从 image_features 中切分出语义特征部分，并 reshape 到 (h, w, -1)
+            # Split the semantic features from image_features and reshape to (h, w, -1)
             semantic_features = torch.split(image_features[:, :sum(semantic_sizes), :], semantic_sizes, dim=1)
             h_semantics = [feat.view(h, w, -1) for feat, ((h, w), _) in zip(semantic_features, image_feature_shapes)]
 
-            # 从 image_features 中切分出细节特征部分（注意起始索引从 sum(semantic_sizes) 开始），并 reshape 到 (h, w, -1)
+            # Split the detail features from image_features (note that the starting index is sum(semantic_sizes)) and reshape to (h, w, -1)
             det_features = torch.split(image_features[:, sum(semantic_sizes): sum(semantic_sizes) + sum(pixel_sizes), :], pixel_sizes, dim=1)
             h_pixels = [feat.view(h, w, -1) for feat, (_, (h, w)) in zip(det_features, image_feature_shapes)]
 
@@ -296,11 +294,11 @@ class IllumeMetaForCausalLM(ABC):
             semantic_sizes = [h * w for (h, w), _ in image_feature_shapes]
             pixel_sizes = [h * w for _, (h, w) in image_feature_shapes]
 
-            # 从 image_features 中切分出语义特征部分，并 reshape 到 (h, w, -1)
+            # Split the semantic features from image_features and reshape to (h, w, -1)
             semantic_features = torch.split(image_features[:, :sum(semantic_sizes), :], semantic_sizes, dim=1)
             h_semantics = [feat.view(h * w, -1) for feat, ((h, w), _) in zip(semantic_features, image_feature_shapes)]
 
-            # 从 image_features 中切分出细节特征部分（注意起始索引从 sum(semantic_sizes) 开始），并 reshape 到 (h, w, -1)
+            # Split the detail features from image_features (note that the starting index is sum(semantic_sizes)) and reshape to (h, w, -1)
             det_features = torch.split(
                 image_features[:, sum(semantic_sizes): sum(semantic_sizes) + sum(pixel_sizes), :], pixel_sizes, dim=1)
             h_pixels = [feat.view(h * w, -1) for feat, (_, (h, w)) in zip(det_features, image_feature_shapes)]
@@ -586,8 +584,6 @@ class IllumeMetaForCausalLM(ABC):
                     p.requires_grad = False
 
         pretrain_trainables = model_args.get('pretrain_trainables', None)
-        if pretrain_trainables is not None:
-            pretrain_trainables = safe_check_checkpoint_path(pretrain_trainables)
 
         def load_weights(pretrain_trainables):
             if pretrain_trainables is not None:
@@ -615,7 +611,7 @@ class IllumeMetaForCausalLM(ABC):
             rank0_print("freeze text embedding and open vision embedding")
             text_token_num = model_args.get("text_token_num", 151665)
 
-            # 加载预训练权重
+            # load pretrain weights
             load_weights(pretrain_trainables)
 
             def grad_hook_embedding(grad):
@@ -628,13 +624,13 @@ class IllumeMetaForCausalLM(ABC):
                 vocab_mask[text_token_num:, :] = 1
                 return vocab_mask * grad
 
-            # 打开梯度
+            # open gradients
             for p in self.get_input_embeddings().parameters():
                 p.requires_grad = True
             for p in self.get_output_embeddings().parameters():
                 p.requires_grad = True
 
-            # 梯度回传时mask文本词表的梯度
+            # mask gradients of text vocabulary during backpropagation
             self.get_input_embeddings().weight.register_hook(grad_hook_embedding)
             self.get_output_embeddings().weight.register_hook(grad_hook_output_layer)
 
