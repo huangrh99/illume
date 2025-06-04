@@ -31,8 +31,7 @@ TORCH_DTYPE=bf16 # or fp16, fp32
 
 echo "Starting image editing inference..."
 
-#torchrun --nproc_per_node=8 generation_eval/main.py \
-CUDA_VISIBLE_DEVICES=4,5 torchrun --nproc_per_node=2 generation_eval/main.py \
+torchrun --nproc_per_node=8 generation_eval/main.py \
     --mllm_config $CONFIG_NAME --tokenizer_config $TOKENIZER_CONFIG \
     --batch_size $INFERENCE_BATCH_SIZE --torch_dtype $TORCH_DTYPE \
     --chosen_datasets $DATASET_NAME \

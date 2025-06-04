@@ -39,8 +39,8 @@ With its strong performance, ILLUME+ provides a scalable and versatile foundatio
 ### MLLM
 | Model Name | 🤗 HF Format | Origin Format |                                   Config                                   |
 | :--------: | :------------: | :----------: |:--------------------------------------------------------------------------:|
-| ILLUME+ 3B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b) | [Config](configs/examples/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py) |
-| ILLUME+ 7B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b) | [Config](configs/examples/illume_plus_7b/illume_plus_qwen2_5_7b_stage3.py) |
+| ILLUME+ 3B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b) | [Config](configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py) |
+| ILLUME+ 7B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b) | [Config](configs/example/illume_plus_7b/illume_plus_qwen2_5_7b_stage3.py) |
 
 
 
@@ -48,7 +48,7 @@ With its strong performance, ILLUME+ provides a scalable and versatile foundatio
 ### Vision Tokenizer
 | Model Name | Codebook Size |  Checkpoint | Config  | Diffusion Decoder   |
 | :--------: |  :------------: | :------------: | :----------: | :----------------------------------------------------------: |
-| DualViTok  | 32K(Sem) + 98K(pixel) |  [Link](https://huggingface.co/ILLUME-MLLM/dualvitok) | [Config](configs/examples/dualvitok/dualvitok_anyres_max512.py) | [SDXL](https://huggingface.co/ILLUME-MLLM/dualvitok-sdxl-decoder) |
+| DualViTok  | 32K(Sem) + 98K(pixel) |  [Link](https://huggingface.co/ILLUME-MLLM/dualvitok) | [Config](configs/example/dualvitok/dualvitok_anyres_max512.py) | [SDXL](https://huggingface.co/ILLUME-MLLM/dualvitok-sdxl-decoder) |
 
 ## Setup & Installation
 
@@ -141,8 +141,8 @@ mkdir -p ./logdir/illume_plus_3b/
 ln -s $(pwd)/../checkpoints/illume_plus-qwen2_5-3b $(pwd)/logdir/illume_plus_3b/illume_plus-qwen2_5-3b_stage3/
 
 ## Run the app.py
-python app.py --config ../configs/examples/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py  \
-  --tokenizer_config ../configs/examples/dualvitok/dualvitok_anyres_max512.py \
+python app.py --config ../configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py  \
+  --tokenizer_config ../configs/example/dualvitok/dualvitok_anyres_max512.py \
   --tokenizer_checkpoint ../checkpoints/dualvitok/pytorch_model.bin \
   --diffusion_decoder_path ../checkpoints/dualvitok_sdxl_decoder \
   --torch_dtype=bf16
@@ -153,7 +153,7 @@ python app.py --config ../configs/examples/illume_plus_3b/illume_plus_qwen2_5_3b
 ```shell
 cd vision_tokenizer
 
-python app.py ../configs/examples/dualvitok/dualvitok_anyres_max512.py \
+python app.py ../configs/example/dualvitok/dualvitok_anyres_max512.py \
   --vq-ckpt=../checkpoints/dualvitok/pytorch_model.bin \
   --sdxl-decoder-path ../checkpoints/dualvitok-sdxl-decoder
 ```
@@ -179,7 +179,7 @@ ln -s /path/to/imagenet_val_set/ ./data/imagenet_val
 This training uses images resized and center-cropped to 256x256.
 ```shell
 cd vision_tokenizer
-torchrun --nproc_per_node 8 tokenizer/train_dualvitok.py ../configs/examples/dualvitok/dualvitok_fix256.py
+torchrun --nproc_per_node 8 tokenizer/train_dualvitok.py ../configs/example/dualvitok/dualvitok_fix256.py
 ```
 
 **Example 2. Training with variable resolution (max 512x512):**
@@ -191,7 +191,7 @@ cd vision_tokenizer
 python scripts/read_folder_image_sizes.py --input_folder ./data/imagenet_train/ --output_json ./data/json_files/imagenet_train.json
 
 # Then run the script to train vision tokenizer.
-torchrun --nproc_per_node 8 tokenizer/train_dualvitok.py ../configs/examples/dualvitok/dualvitok_anyres_max512.py 
+torchrun --nproc_per_node 8 tokenizer/train_dualvitok.py ../configs/example/dualvitok/dualvitok_anyres_max512.py 
 ```
     
 ### Evaluate DualViTok on ImageNet Val 50k.
@@ -201,7 +201,7 @@ We use the [torch_fidelity](https://github.com/toshas/torch-fidelity) to calcula
 To run reconstruction inference on the ImageNet validation set (50k images):
 ```shell
 cd vision_tokenizer
-torchrun --nproc_per_node 8 tokenizer/reconstruction_vq_ddp.py ../configs/examples/dualvitok/dualvitok_anyres_max512.py \
+torchrun --nproc_per_node 8 tokenizer/reconstruction_vq_ddp.py ../configs/example/dualvitok/dualvitok_anyres_max512.py \
   --vq-ckpt=../checkpoints/dualvitok/pytorch_model.bin --model-dtype fp32
 ```
     
@@ -222,25 +222,25 @@ python ILLUME/scripts/prepare_llm_with_extended_vision_tokenizer.py \
 
 #### Train
 
-The training process is configured using `configs/examples/illume_debug/illume_debug.py`.
+The training process is configured using `configs/example/illume_debug/illume_debug.py`.
 **Important:** Before starting the training, please open this configuration file and verify/update the following critical paths and settings:
 *   **Base MLLM Model Path:** Ensure this points to the MLLM prepared in "STEP 2: Prepare mllm".
 *   **Vision Tokenizer Path:** Set this to the path of your trained DualViTok checkpoint.
 *   **Data Paths:** Confirm that all paths to your training datasets (prepared in "STEP 1: Prepare Data") are correct.
 *   **Output Directory:** Specify the directory where training checkpoints and logs will be saved.
 
-After configuring `configs/examples/illume_debug/illume_debug.py`, run the training command:
+After configuring `configs/example/illume_debug/illume_debug.py`, run the training command:
 
 ```shell
 export PYTHONPATH=$PYTHONPATH:$CODE_DIR/ILLUME/
 export PYTHONPATH=$PYTHONPATH:$CODE_DIR/vision_tokenizer/
 cd ILLUME
-torchrun --nproc_per_node=8 illume/train/train.py ../configs/examples/illume_debug/illume_debug.py
+torchrun --nproc_per_node=8 illume/train/train.py ../configs/example/illume_debug/illume_debug.py
 ```
 
 If you want to finetune the checkpoint, modify the `data_args.language_model.pretrained_model_name_or_path` to the pretrained checkpoint:
 ```shell
-torchrun --nproc_per_node=8 illume/train/train.py ../configs/examples/illume_debug/illume_debug.py --model_args.language_model.pretrained_model_name_or_path='/path/to/checkpoints/'
+torchrun --nproc_per_node=8 illume/train/train.py ../configs/example/illume_debug/illume_debug.py --model_args.language_model.pretrained_model_name_or_path='/path/to/checkpoints/'
 ```
 
 ### Evaluate MLLM
@@ -260,20 +260,20 @@ git checkout v0.3.0
 pip install -e . ; cd ..
 ```
 
-Then, set the config in the `--model_args` to evaluate the specific model. The mllm ckpt should be in `training_args.output_dir` in the config `../configs/examples/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py`. Running the following command:
+Then, set the config in the `--model_args` to evaluate the specific model. The mllm ckpt should be in `training_args.output_dir` in the config `../configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py`. Running the following command:
     
 ```shell
 cd ILLUME 
 accelerate launch --num_processes 8 -m lmms_eval \
 --model illume --tasks mme_nopost --batch_size 1 \
 --log_samples --log_samples_suffix illume_plus_3b \
---output_path ./logs/ --model_args pretrained=../configs/examples/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py
+--output_path ./logs/ --model_args pretrained=../configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py
 ```
 
 #### Inference on text-to-image generation task
 The inference datasets are defined in [meta_dataset_configs.py](ILLUME/generation_eval/generation_dataset/meta_dataset_configs.py).
 
-See test data format of examples in [t2i_test_examples.jsonl](configs/data_configs/test_data_examples/Text2ImageExample/t2i_test_examples.jsonl).
+See test data format of examples in [t2i_test_examples.jsonl](configs/data_configs/test_data_example/Text2ImageExample/t2i_test_examples.jsonl).
 
 To run text-to-image generation:
 ```shell
@@ -284,7 +284,7 @@ bash scripts/inference_text_to_image.sh
 #### Inference on image editing task
 The inference datasets are defined in [meta_dataset_configs.py](ILLUME/generation_eval/generation_dataset/meta_dataset_configs.py).
 
-See test data format of examples in [edit_test_examples.jsonl](configs/data_configs/test_data_examples/EditingSingleTurnExample/edit_test_examples.jsonl).
+See test data format of examples in [edit_test_examples.jsonl](configs/data_configs/test_data_example/EditingSingleTurnExample/edit_test_examples.jsonl).
     
 To run image editing inference:
 ```shell
