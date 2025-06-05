@@ -226,6 +226,9 @@ class ILLUME():
         model.config.image_aspect_ratio = self.config.data_args.image_aspect_ratio
         model.config.special_tokens_ids = self.config.model_args.get("special_tokens_ids", [])
 
+        # try encode resolution tag. It should only output one token.
+        assert len(tokenizer.encode('<height_1024>')) == 1
+
         self.mllm_model = model
         self.tokenizer = tokenizer
         self.image_processor = image_processor

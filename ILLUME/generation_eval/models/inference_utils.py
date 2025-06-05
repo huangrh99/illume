@@ -424,7 +424,7 @@ class DynamicSamplingProcessor(LogitsProcessor):
     def _apply_sampling(self, scores, temp, top_k, top_p):
         """ Apply top-k, top-p, and temperature """
         # Apply temperature
-        if temp > 0.0:  # Avoid division by 1
+        if temp > 0.0:  # Avoid division by 0
             scores = scores / temp
 
         # Top-K filtering
@@ -546,8 +546,8 @@ class InterleavedLogitsProcessor(LogitsProcessor):
             return scores
 
         if self.out is None:
-            self.out = self.model(self.uncond.to(self.model.device), images=self.images, image_sizes=self.image_sizes,
-                                  use_cache=True)
+            self.out = self.model(torch.cat([self.uncond, input_ids[:, -1:]], dim=-1).to(self.model.device), 
+                                  images=self.images, image_sizes=self.image_sizes, use_cache=True)
         else:
             self.out = self.model(
                 input_ids[:, -1:],
@@ -583,7 +583,6 @@ class InterleavedLogitsProcessor(LogitsProcessor):
         return scores
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-
         # --- Step 0: Get last token and Vocab Size ---
         last_token = None
         if input_ids.shape[1] > 0:
@@ -672,10 +671,6 @@ class InterleavedLogitsProcessor(LogitsProcessor):
                     mask[:, self.special_tokens["end_of_image"]] = True
 
         else:
-            # --- Text Generation Masking (REFINED) ---
-            # Start by disallowing everything
-            # mask[:, :] = False (already initialized to False)
-
             # Allow *all* tokens by default...
             mask[:, :] = True
             # ...then specifically *disallow* image content and intermediate structure tokens
@@ -691,8 +686,6 @@ class InterleavedLogitsProcessor(LogitsProcessor):
             # (This overrides any potential disallowing above if IDs overlap, e.g., if EOS was in image range)
             mask[:, self.special_tokens["end_of_text"]] = True
             mask[:, self.special_tokens["start_of_image"]] = True
-
-            # Note: All other tokens (regular text) remain True from the initial mask[:, :] = True
 
         # Apply the mask
         scores[~mask] = -float("Inf")

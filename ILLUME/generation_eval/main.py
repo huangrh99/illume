@@ -124,7 +124,7 @@ def main_inference(args):
             llm_outputs = []
             for batch_index in tqdm(batch_index_list, disable=(local_rank != 0)):
                 batch_data = [val_dataset.__getitem__(idx) for idx in batch_index]
-                print("batch_data", batch_data)
+
                 output = eval_model.get_one_batch_results(batch_data, inference_config)
                 llm_outputs.extend(output["batch_llm_output"])
 
