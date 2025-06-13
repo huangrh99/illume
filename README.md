@@ -281,7 +281,7 @@ Step 2: Prepare mllm
 python ILLUME/scripts/prepare_llm_with_extended_vision_tokenizer.py \
 --model_path Qwen/Qwen2.5-3B-Instruct  \
 --semantic_codebook_size 32768  \
---pixel_codebook_size 32768 * 3 \
+--pixel_codebook_size 98304 \
 --output_model_path checkpoints/Qwen2.5-3B-Instruct-with-vision-tokenizer-32k-96k-level2
 ```
 
