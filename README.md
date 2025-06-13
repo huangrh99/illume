@@ -42,8 +42,68 @@ With its strong performance, ILLUME+ provides a scalable and versatile foundatio
 | ILLUME+ 3B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b) | [Config](configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py) |
 | ILLUME+ 7B | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b-hf) | [Link](https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-7b) | [Config](configs/example/illume_plus_7b/illume_plus_qwen2_5_7b_stage3.py) |
 
+<details>
+<summary>Performance</summary>
 
+### Image Understanding Performance
+| Model      | POPE | MMBench | SEED | MME-P | MM-Vet | MMMU | AI2D | VQA-text | ChartQA | DocVQA | InfoVQA | OCRBench |
+|------------|-----:|--------:|-----:|------:|-------:|-----:|-----:|---------:|--------:|-------:|--------:|---------:|
+| ILLUME+ 3B  | 87.6 |  80.8   | 73.3 | 1414.0|  40.3  | 44.3 | 74.2 |   69.9   |  69.9   |  80.8  |   44.1  |   672    |
+| ILLUME+ 7B  | 88.7 |  79.3   | 74.3 | 1547.1|  47.7  | 37.6 | 78.0 |   75.2   |  82.1   | 88.6 | 0.5745 |   772    |
 
+### Image Generation Performance
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Model</th>
+      <th rowspan="2">MJHQ30k<br>FID&nbsp;↓</th>
+      <th colspan="2">GenAI-bench</th>
+      <th colspan="7">GenEval</th>
+    </tr>
+    <tr>
+      <th>Basic</th>
+      <th>Advanced</th>
+      <th>Overall</th>
+      <th>Single&nbsp;Obj</th>
+      <th>Two&nbsp;Obj</th>
+      <th>Counting</th>
+      <th>Colors</th>
+      <th>Position</th>
+      <th>Color&nbsp;Attri.</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ILLUME+ 3B</td>
+      <td>6.00</td>
+      <td>0.72</td>
+      <td>0.71</td>
+      <td>0.72</td>
+      <td>0.99</td>
+      <td>0.88</td>
+      <td>0.62</td>
+      <td>0.84</td>
+      <td>0.42</td>
+      <td>0.53</td>
+    </tr>
+    <tr>
+      <td>ILLUME+ 7B</td>
+      <td>5.78</td>
+      <td>0.72</td>
+      <td>0.72</td>
+      <td>0.74</td>
+      <td>0.99</td>
+      <td>0.88</td>
+      <td>0.60</td>
+      <td>0.87</td>
+      <td>0.54</td>
+      <td>0.58</td>
+    </tr>
+  </tbody>
+</table>
+
+Note that the data for training the 7B model is slightly different to the 3B model.
+</details>
 
 ### Vision Tokenizer
 | Model Name | Codebook Size |  Checkpoint | Config  | Diffusion Decoder   |
@@ -147,6 +207,11 @@ python app.py --config ../configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_
   --diffusion_decoder_path ../checkpoints/dualvitok_sdxl_decoder \
   --torch_dtype=bf16
 ```
+
+Note that we implement [InterleavedLogitsProcessor](ILLUME/generation_eval/models/inference_utils.py#L477) in inference for three key reasons:
+1. To activate the image generation mode with classifier-free guidance when meeting `<start_of_image>` tokens.
+2. To handle the varying number of image tokens across different resolutions and ensure proper alignment between semantic-level tokens and pixel-level tokens in each line.
+3. To prevent sampling of incorrect modality tokens when `do_sample=True` is enabled during text or image generation.
 
 ### Vision Tokenizer Demo
 

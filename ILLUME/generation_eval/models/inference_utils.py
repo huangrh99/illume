@@ -193,12 +193,24 @@ class CFGLogits(LogitsProcessor):
         self.rescale_factor = rescale_factor
 
     def __call__(self, input_ids, scores):
-        scores = F.log_softmax(scores, dim=-1)
         if self.guidance_scale == 1:
             return scores
 
+        scores = F.log_softmax(scores, dim=-1)
+
         if self.out is None:
-            self.out = self.model(self.uncond.to(self.model.device), images=self.images, image_sizes=self.image_sizes,
+            uncond_inputs = self.uncond.clone()
+            if not torch.equal(uncond_inputs[:, -1:], input_ids[:, -1:]):
+                # Check if unconditional prompt has resolution tag.
+                # The resolution tag is the second to last token in input_ids.
+                if torch.equal(uncond_inputs[:, -2:], input_ids[:, -3:-1]):
+                    # already has resolution tag in uncond.
+                    uncond_inputs = torch.cat([uncond_inputs, input_ids[:, -1:]], dim=-1)
+                else:
+                    # No resolution tag
+                    uncond_inputs = torch.cat([uncond_inputs, input_ids[:, -3:]], dim=-1)
+
+            self.out = self.model(uncond_inputs.to(self.model.device), images=self.images, image_sizes=self.image_sizes,
                                   use_cache=True)
         else:
             self.out = self.model(
@@ -424,7 +436,7 @@ class DynamicSamplingProcessor(LogitsProcessor):
     def _apply_sampling(self, scores, temp, top_k, top_p):
         """ Apply top-k, top-p, and temperature """
         # Apply temperature
-        if temp > 0.0:  # Avoid division by 0
+        if temp > 0.0:  # Avoid division by 0.0
             scores = scores / temp
 
         # Top-K filtering
@@ -546,7 +558,17 @@ class InterleavedLogitsProcessor(LogitsProcessor):
             return scores
 
         if self.out is None:
-            self.out = self.model(torch.cat([self.uncond, input_ids[:, -1:]], dim=-1).to(self.model.device), 
+            uncond_inputs = self.uncond.clone()
+            if not torch.equal(uncond_inputs[:, -1:], input_ids[:, -1:]):
+                # Check if unconditional prompt has resolution tag.
+                # The resolution tag is the second to last token in input_ids.
+                if torch.equal(uncond_inputs[:, -2:], input_ids[:, -3:-1]):
+                    # already has resolution tag in uncond.
+                    uncond_inputs = torch.cat([uncond_inputs, input_ids[:, -1:]], dim=-1)
+                else:
+                    # No resolution tag
+                    uncond_inputs = torch.cat([uncond_inputs, input_ids[:, -3:]], dim=-1)
+            self.out = self.model(uncond_inputs.to(self.model.device),
                                   images=self.images, image_sizes=self.image_sizes, use_cache=True)
         else:
             self.out = self.model(
