@@ -5,7 +5,7 @@
 # **ILLUME+: Illuminating Unified MLLM with Dual Visual Tokenization and Diffusion Refinement**
 
 
-📄 [Paper](https://arxiv.org/abs/2504.01934) | 🌐 [Project-Page](https://illume-unified-mllm.github.io/) | 🤗 [ILLUME+ Models](https://huggingface.co/collections/Emova-ollm/emova-models-67779d377bb8261e6057a320) | 🤗 [ILLUME+ Demo](https://huggingface.co/spaces/Emova-ollm/EMOVA-demo) <br/>
+📄 [Paper](https://arxiv.org/abs/2504.01934) | 🌐 [Project-Page](https://illume-unified-mllm.github.io/) | 🤗 [ILLUME+ Models](https://huggingface.co/collections/ILLUME-MLLM/illume-models-683b3916f5af2d0a015b3477) | 🤗 [ILLUME+ Demo](https://huggingface.co/spaces/ILLUME-MLLM/ILLUME_plus-7b) <br/>
 
 
 </div>
@@ -175,7 +175,7 @@ Please check our model's usage and inference examples on HuggingFace: [illume_pl
 
 ### Inference Example with codebase
 
-To run inference using the models downloaded in the "Setup & Installation" section:
+To run inference using the models downloaded in the ["Setup & Installation"](#setup--installation) section:
 Then follow [inference.ipynb](ILLUME/inference.ipynb).
 
 ### MLLM Demo
@@ -375,6 +375,12 @@ bash scripts/inference_image_editing.sh
 
 
 ![alt text](assets/images/vis_und.png)
+
+
+If you encounter any problems or have suggestions, please feel free to [open an issue](https://github.com/illume-unified-mllm/ILLUME_plus/issues) on our GitHub repository. We welcome your feedback and contributions!
+
+
+We would like to acknowledge [LLaVA](https://github.com/haotian-liu/LLaVA), [EMOVA](https://github.com/emova-ollm/EMOVA), and [LlamaGen](https://github.com/FoundationVision/LlamaGen) for their inspiring work.
 
 
 ## Citation
