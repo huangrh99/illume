@@ -558,7 +558,7 @@ class InterleavedLogitsProcessor(LogitsProcessor):
             return scores
 
         if self.out is None:
-            uncond_inputs = self.uncond.clone()
+            uncond_inputs = self.uncond.clone().to(input_ids)
             if not torch.equal(uncond_inputs[:, -1:], input_ids[:, -1:]):
                 # Check if unconditional prompt has resolution tag.
                 # The resolution tag is the second to last token in input_ids.
