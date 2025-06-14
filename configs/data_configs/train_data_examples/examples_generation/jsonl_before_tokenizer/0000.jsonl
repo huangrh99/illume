@@ -1,1 +1,1 @@
-{"images": ["0.jpg"], "conversations": [{"from": "human", "value": "Generate an image of {resolution_tag}, the content of image is a cute frog dressed up like a cowboy with a western theme.\n"}, {"from": "gpt", "value": "<image>"}]}
+{"images": ["0.png"], "conversations": [{"from": "human", "value": "Generate an image of {resolution_tag}, the content of image is a cute frog dressed up like a cowboy with a western theme.\n"}, {"from": "gpt", "value": "<image>"}]}

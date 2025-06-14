@@ -273,7 +273,7 @@ torchrun --nproc_per_node 8 tokenizer/reconstruction_vq_ddp.py ../configs/exampl
 ### Training MLLM
 #### Preparation of data and model
 Step 1: Prepare Data and Tokenizer Checkpoint
-Please refer to [Data.md](static/docs/Data.md).
+Please refer to [Data.md](assets/docs/Data.md).
 
 Step 2: Prepare mllm
 ```shell
@@ -287,14 +287,7 @@ python ILLUME/scripts/prepare_llm_with_extended_vision_tokenizer.py \
 
 #### Train
 
-The training process is configured using `configs/example/illume_debug/illume_debug.py`.
-**Important:** Before starting the training, please open this configuration file and verify/update the following critical paths and settings:
-*   **Base MLLM Model Path:** Ensure this points to the MLLM prepared in "STEP 2: Prepare mllm".
-*   **Vision Tokenizer Path:** Set this to the path of your trained DualViTok checkpoint.
-*   **Data Paths:** Confirm that all paths to your training datasets (prepared in "STEP 1: Prepare Data") are correct.
-*   **Output Directory:** Specify the directory where training checkpoints and logs will be saved.
-
-After configuring `configs/example/illume_debug/illume_debug.py`, run the training command:
+Configure `configs/example/illume_debug/illume_debug.py` and run the training command:
 
 ```shell
 export PYTHONPATH=$PYTHONPATH:$CODE_DIR/ILLUME/
@@ -303,7 +296,7 @@ cd ILLUME
 torchrun --nproc_per_node=8 illume/train/train.py ../configs/example/illume_debug/illume_debug.py
 ```
 
-If you want to finetune the checkpoint, modify the `data_args.language_model.pretrained_model_name_or_path` to the pretrained checkpoint:
+If you want to finetune the pretrained model, modify the `data_args.language_model.pretrained_model_name_or_path` to the pretrained checkpoint:
 ```shell
 torchrun --nproc_per_node=8 illume/train/train.py ../configs/example/illume_debug/illume_debug.py --model_args.language_model.pretrained_model_name_or_path='/path/to/checkpoints/'
 ```
