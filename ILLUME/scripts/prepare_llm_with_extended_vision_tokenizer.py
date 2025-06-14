@@ -53,7 +53,7 @@ def extend_qwen2_5(model_path, output_model_path, add_token_num_per_levels):
 
     tokenizer.save_pretrained(output_model_path)
     print(f"save tokenizer to {output_model_path}")
-
+    
     # save model
     dtype = torch.bfloat16
 

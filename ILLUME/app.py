@@ -638,7 +638,7 @@ title_markdown = """
     <h2 style="margin: 10px 0;">
       <a href="https://arxiv.org/abs/2504.01934" target="_blank" rel="noopener noreferrer">Paper</a> |
       <a href="https://github.com/illume-unified-mllm/ILLUME_plus" target="_blank" rel="noopener noreferrer">Code</a> |
-      <a href="https://huggingface.co/ILLUME-MLLM/illume_plus-qwen2_5-3b-hf" target="_blank" rel="noopener noreferrer">Model</a> |
+      <a href="https://huggingface.co/collections/ILLUME-MLLM/illume-models-683b3916f5af2d0a015b3477" target="_blank" rel="noopener noreferrer">Model</a> |
       <a href="https://illume-unified-mllm.github.io/" target="_blank" rel="noopener noreferrer">Project Page</a>
     </h2>
     <ul style="margin: 20px 0; padding-left: 20px;">
@@ -693,47 +693,6 @@ block_css = """
     min-width: 150px !important;
 }
 """
-
-
-# (Keep load_demo_refresh_model_list as it is)
-
-def load_initial_state_and_example1():
-    """
-    Loads the initial Conversation state and prepares the inputs
-    for the first example to populate the UI on startup.
-    """
-    logging.info("Loading initial state and Example 1 inputs for UI.")
-
-    # 1. Get the base initial state object
-    initial_state = load_demo_refresh_model_list()
-    # At this point, initial_state is a Conversation object with empty messages.
-    initial_state = 'chat'
-
-    # 2. Define Example 1 inputs
-    image_path = "../configs/data_configs/test_data_examples/ImageUnderstandingExample/images/1.png"  # Make sure this path is correct relative to where you run the script
-    text_prompt = "Describe this scene in detail."
-    image_pil = None
-
-    # 3. Load the example image
-    try:
-        # Ensure the image file exists and load it
-        if os.path.exists(image_path):
-            image_pil = Image.open(image_path)
-            logging.info(f"Successfully loaded example image: {image_path}")
-        else:
-            logging.warning(f"Example image not found at: {image_path}. Image box will be empty.")
-            # Optionally provide a placeholder blank image?
-            # image_pil = Image.new('RGB', (60, 30), color = 'red') # Example placeholder
-    except Exception as e:
-        logging.error(f"Error loading example image {image_path}: {e}")
-        image_pil = None  # Ensure it's None on error
-
-    # 4. Return values to populate the UI components
-    #    - state: The initial Conversation object
-    #    - chatbot: The initial empty chatbot display ([]) derived from the initial state
-    #    - textbox: The example text prompt
-    #    - imagebox: The loaded PIL image (or None)
-    return initial_state, initial_state.to_gradio_chatbot(), text_prompt, image_pil
 
 
 def build_demo(embed_mode):
@@ -853,7 +812,7 @@ def build_demo(embed_mode):
                     [None, "a smiling child."],
                     [None, "tiger cub playing with soccer ball"],
                     [None, "screenshot from a 16 bit platform game in a lush green landscape"],
-                    [None, "Old car in kandy sri lanka,lake road,flower, bright, sunny, orange sky, photorealistic"],
+                    [None, "Old car in kandy sri lanka,lake road,flower, bright, sunny, orange sky."],
                     [None, "Create a vibrant painting of a tropical beach at sunset."],
                 ], inputs=[imagebox, textbox], label='Image Generation Examples')
 

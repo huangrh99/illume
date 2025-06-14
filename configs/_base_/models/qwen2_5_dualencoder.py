@@ -18,7 +18,7 @@ model_args = dict(
     ),
     mm_vision_tower=dict(
         type='DualVisionTower',
-        vq_config="../configs/example/dualvitok/dualvitok_anyres_max512.py",
+        vq_config="configs/example/dualvitok/dualvitok_anyres_max512.py",
         vq_ckpt="../checkpoints/dualvitok/pytorch_model.bin",
         min_pixels=256 * 256,
         max_pixels=256 * 256,
