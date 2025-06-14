@@ -5,38 +5,32 @@ import logging
 from functools import partial
 from threading import Thread
 
+import re  # Added for parsing image tokens
+
+import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+
+from transformers import TextIteratorStreamer
+
+from transformers import AutoModel, AutoProcessor
 from PIL import Image
 
-# --- Add necessary imports from your ILLUME codebase ---
-import torch
-torch.backends.cudnn.allow_tf32 = True
-from transformers import LogitsProcessorList, TextIteratorStreamer
-
-from illume.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
-from illume.conversation import conv_templates, default_conversation  # Import Conversation class
-from illume.mm_utils import process_images, tokenizer_image_token
-from illume.data.data_utils import unpad_and_resize_back
-
-from generation_eval.models.builder import build_eval_model
-from generation_eval.models.inference_utils import CFGLogits, DualVQImageTokenProcessor, DynamicSamplingProcessor, \
-    InterleavedLogitsProcessor, parse_interleaved_text_image, calculate_image_token_num, check_image_token_num
-
-# --- End ILLUME Imports ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 logging.getLogger("http").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
-# logging.getLogger("PIL").setLevel(logging.WARNING) # Optional: Reduce PIL logging noise
 
 import gradio as gr
 
-# Use the Conversation class directly instead of the public one
-# from conversation_public import default_conversation, conv_templates, SeparatorStyle # Remove this
+from illume.conversation import default_conversation, conv_templates, SeparatorStyle
+# from conversation import default_conversation, conv_templates, SeparatorStyle
 
 # --- Global Variables and Model Loading ---
-eval_model = None  # Global variable to hold the loaded ILLUME model
+model = None  # Global variable to hold the loaded ILLUME model
 args = None  # Global variable to hold command line args
 streamer = None  # Global variable to hold command line args
+
+DEFAULT_IMAGE_TOKEN = '<image>'
 
 # Define common resolutions
 DEFAULT_RESOLUTIONS = [
@@ -49,27 +43,83 @@ DEFAULT_DIFFUSION_RESOLUTIONS = [
     (768, 1024), (512, 768), (768, 512), (512, 1024), (1024, 512)
 ]
 
-# qwen2.5
-special_tokens_ids = [151665, 151666, 151667, 151668, 151669, 151670, 151671]
-start_token = 151672 + 32
-level0_range = (start_token, start_token + 32768)  # Level 0 token ID 鑼冨洿
-level1_range = (start_token + 32768, start_token + 32768 * 4)  # Level 1 token ID 鑼冨洿
-
-special_tokens_dict = {
-    "start_of_image": 151665,
-    "end_of_image": 151666,
-    "start_of_level0": 151668,
-    "end_of_level0": 151669,
-    "start_of_level1": 151670,
-    "end_of_level1": 151671,
-    "end_of_line": 151667,
-    "end_of_text": 151645,
-    #
-    "level0_range": level0_range,
-    "level1_range": level1_range,
-}
+conv_templates_version = 'qwen2'
 
 
+# inputs = processor(**inputs, return_tensors="pt")
+# inputs = inputs.to(model.device)
+
+# # prepare generation arguments
+# gen_kwargs = dict(
+#     max_new_tokens=2048, do_sample=True
+# )
+
+# image_gen_kwargs = dict(
+#     negative_image_prompt_ids=uncond_inputs.input_ids,
+#     target_image_resolution=target_image_resolution,
+#     guidance_scale=2.0,
+#     image_semantic_temperature=1.0,
+#     image_semantic_top_k=2048,
+#     image_semantic_top_p=1.0,
+#     image_pixel_temperature=1.0,
+#     image_pixel_top_k=2048 * 3,
+#     image_pixel_top_p=1.0,
+# )
+
+# gen_kwargs = dict(
+#     max_new_tokens=2048, do_sample=False
+# )
+
+# # run generation
+# with torch.no_grad():
+#     outputs = model.generate(**inputs, **gen_kwargs)
+#     outputs = outputs[:, inputs['input_ids'].shape[1]:]
+#     outputs_text = processor.batch_decode(outputs, skip_special_tokens=True)
+
+# # It extract the image tokens of each image and replace the image tokens with the `image_placeholder` in order.
+# generated_text, image_embed_inds_list, list_image_token_parts = processor.parse_text_image(outputs_text[0],
+#                                                                                            image_placeholder='<image_out>')
+
+# # batch decoding the image by using the DualViTok.
+# vq_decoded_images = processor.decode_images(image_embed_inds_list, target_resolution=target_image_resolution)
+
+# # batch decoding the image by using the sdxl diffusion decoder.
+# # The output image resolution would be [target_image_resolution[0] * 2, target_image_resolution[1] * 2]
+# diffusion_decoded_images = processor.decode_images(image_embed_inds_list, target_resolution=target_image_resolution,
+#                                                    use_diffusion=True, diffusion_cfg_scale=2.0,
+#                                                    diffusion_num_inference_steps=20)
+
+# vq_decoded_images[0].save('vq_decoded_cat.png')
+# diffusion_decoded_images[0].save('diffusion_decoded_cat.png')
+
+
+# Adapted from your code
+def check_image_token_num(image_embed_inds, token_nums=[81, 256], identifier=""):
+    image_embed_inds_out = []
+    if len(image_embed_inds) != len(token_nums):
+        logging.error(
+            f"{identifier} Mismatch between number of image token levels ({len(image_embed_inds)}) and expected token_nums ({len(token_nums)})")
+        # Handle error appropriately - maybe return None or raise exception
+        return None  # Indicate error
+
+    for level, (embed_inds, token_num) in enumerate(zip(image_embed_inds, token_nums)):
+        if not len(embed_inds) == token_num:
+            logging.warning(
+                f"{identifier} Level {level} embed_inds length {len(embed_inds)} not equal to expected {token_num}! Padding/truncating.")
+            if len(embed_inds) > token_num:
+                embed_inds = embed_inds[:token_num]
+            elif len(embed_inds) == 0:
+                # Handle empty case - perhaps fill with a default token?
+                logging.warning(f"{identifier} Level {level} embed_inds is empty. Filling with zeros.")
+                embed_inds = [0] * token_num  # Or a placeholder token ID
+            else:
+                # Pad with the last token ID
+                embed_inds.extend([embed_inds[-1]] * (token_num - len(embed_inds)))
+        image_embed_inds_out.append(embed_inds)
+    return image_embed_inds_out
+
+
+# Adapted from your code
 def pad_sequence(tokenizer, input_ids, batch_first, padding_value):
     # Assuming input_ids is a list of Tensors
     if tokenizer.padding_side == "left":
@@ -93,25 +143,19 @@ server_oom_msg = "**OUT OF GPU MEMORY DETECTED. PLEASE DECREASE THE MAX OUTPUT T
 def load_demo_refresh_model_list():
     logging.info("load_demo.")
     # Use the conversation template from the loaded model/config
-    # Ensure eval_model is loaded before this runs
-    if eval_model and hasattr(eval_model, 'config'):
-        conv_template_name = eval_model.config.model_args.version
-        if conv_template_name in conv_templates:
-            state = conv_templates[conv_template_name].copy()
-            logging.info(f"Using conversation template: {conv_template_name}")
-        else:
-            logging.warning(f"Conversation template '{conv_template_name}' not found. Using default.")
-            # Find a default template name from conv_templates or define one
-            default_template_name = next(iter(conv_templates))  # Get the first available template
-            state = conv_templates[default_template_name].copy()
+    # Ensure model is loaded before this runs
+    if conv_templates_version in conv_templates:
+        state = conv_templates[conv_templates_version].copy()
+        logging.info(f"Using conversation template: {conv_templates_version}")
     else:
-        logging.error("Eval model not loaded. Cannot initialize conversation state.")
-        # Fallback or raise error
-        state = default_conversation().copy()
+        logging.warning(f"Conversation template '{conv_templates_version}' not found. Using default.")
+        # Find a default template name from conv_templates or define one
+        default_template_name = next(iter(conv_templates))  # Get the first available template
+        state = conv_templates[default_template_name].copy()
     return state
 
 
-def regenerate(state):
+def regenerate(state):  # Added resolution_wh
     logging.info("regenerate.")
     if not state.messages or len(state.messages) < 2:
         return (state, state.to_gradio_chatbot(), "", None) + (disable_btn,) * 2  # Use state's image
@@ -124,15 +168,18 @@ def regenerate(state):
     return (state, state.to_gradio_chatbot(), "", None) + (disable_btn,) * 2
 
 
-def http_bot_conditional_then(state, temperature, top_k, top_p, max_output_tokens,
+def http_bot_conditional_then(state, temperature, top_k, top_p,
+                              image_gen_temperature, image_gen_top_k, image_gen_top_p, max_output_tokens,
                               llm_cfg_scale, resolution_wh, use_diffusion, diffusion_cfg_scale,
                               diffusion_num_inference_steps):
     if state.mode == 'chat':
         result = yield from http_chat_bot(state, temperature, top_k, top_p, max_output_tokens)
     else:
-        result = yield from http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
-                                              llm_cfg_scale, resolution_wh, use_diffusion, diffusion_cfg_scale,
-                                              diffusion_num_inference_steps)
+        # result = yield from http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
+        result = yield from http_gen_edit_bot(
+            state, temperature, top_k, top_p, image_gen_temperature, image_gen_top_k, image_gen_top_p,
+            max_output_tokens,
+            llm_cfg_scale, resolution_wh, use_diffusion, diffusion_cfg_scale, diffusion_num_inference_steps)
     return result
 
 
@@ -143,7 +190,7 @@ def clear_history():
 
 
 def add_text(state, text, image, mode):
-    global eval_model  # Ensure we use the loaded model
+    global model  # Ensure we use the loaded model
 
     logging.info(f"add_text. Text len: {len(text)}, Image provided: {image is not None}")
     if len(text.strip()) == 0 and image is None:
@@ -154,12 +201,16 @@ def add_text(state, text, image, mode):
     if state.messages and state.messages[-1][1] and \
             isinstance(state.messages[-1][1], str) and state.messages[-1][1].startswith("**"):
         state = load_demo_refresh_model_list()  # Start fresh after error
-    if mode in ['image-generation']:
+
+    if mode == 'image-generation':
         state = load_demo_refresh_model_list()
 
     image_process_mode = "Default"
 
     if image is not None:
+        if state.get_images():
+            state = load_demo_refresh_model_list()
+
         if '<image>' not in text:
             text = f'<image>\n{text}'
         text = (text, image, image_process_mode)
@@ -192,7 +243,7 @@ def stream_response(model, inputs, streamer, prompt, gen_kwargs):
 
 # @spaces.GPU
 def http_chat_bot(state, temperature, top_k, top_p, max_new_tokens):
-    global eval_model, args, streamer  # Use global model and args
+    global model, args, streamer  # Use global model and args
     logging.info("http_chat_bot.")
 
     if state.skip_next:
@@ -211,83 +262,39 @@ def http_chat_bot(state, temperature, top_k, top_p, max_new_tokens):
 
     logging.info(f"Raw Prompt: {prompt}")
 
-    if len(all_images):
-        # Use the process_images function from illume.mm_utils
-
-        # process_images expects a list of PIL Images
-        # Ratios might be needed depending on your config - using None for default
-        images_tensor, image_sizes = process_images(
-            all_images,  # Pass as a list
-            eval_model.image_processor,
-            eval_model.mllm_model.config,
-            eval_model.config,
-            is_gen_task=False,  # Assuming this is correct for general use
-            ratios=DEFAULT_RESOLUTIONS  # Or get ratios based on UI selection if needed
-        )
-
-        if isinstance(images_tensor, list):
-            logging.info(
-                f"Processed image. Tensor shape: {[img.shape for img in images_tensor]}, Size info: {image_sizes}")
-        else:
-            logging.info(f"Processed image. Tensor shape: {images_tensor.shape}, Size info: {image_sizes}")
-    else:
-        # Clear any previously processed image if no new image is provided
-        images_tensor = None
-        image_sizes = None
-
+    inputs = dict(
+        text=prompt,
+    )
     # Tokenize the prompt
-    # Use tokenizer_image_token for potential image placeholder
-    input_ids_list = [tokenizer_image_token(prompt, eval_model.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")]
-    pad_token_ids = eval_model.tokenizer.pad_token_id if eval_model.tokenizer.pad_token_id is not None else eval_model.tokenizer.eos_token_id
-    input_ids = pad_sequence(eval_model.tokenizer, input_ids_list, batch_first=True, padding_value=pad_token_ids).to(
-        eval_model.device)
-    attention_masks = input_ids.ne(pad_token_ids).to(eval_model.device)
-    logging.info(f"Input IDs shape: {input_ids.shape}")
+    # run processors
+    inputs = processor(**inputs, return_tensors="pt")
+    inputs = inputs.to(model.device)
+
+    # avoid mismatch resolution. process the images alone
+    if len(all_images):
+        images = []
+        for image in all_images:
+            images.append(processor.image_processor(image, return_tensors="pt")['pixel_values'].to(model.device))
+        pixel_values = images
+        inputs['pixel_values'] = pixel_values
+
+    logging.info(f"Input IDs shape: {inputs.input_ids.shape}")
 
     # Set initial response placeholder
     state.messages[-1][-1] = "▌"
     yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 2
 
-    # --- MLLM Generation ---
-    inputs = dict(
-        inputs=input_ids,
-        attention_mask=attention_masks,
-        images=images_tensor,  # Pass the processed input image tensor
-        image_sizes=image_sizes,  # Pass image sizes
-    )
-
-    logit_processor = InterleavedLogitsProcessor(
-        # enable_generate_image=False,
-        guidance_scale=1.0,
-        uncond=None,
-        model=eval_model.mllm_model,
-        images=images_tensor,  # Pass input image if present
-        image_sizes=image_sizes,
-        level0_range=level0_range,
-        level1_range=level1_range,
-        num_level0_rows=0,
-        num_level0_tokens=0,
-        num_level1_rows=0,
-        num_level1_tokens=0,
-        special_tokens=special_tokens_dict,
-        default_temp=temperature, level0_temp=1.0,level1_temp=1.0,
-        default_top_k=top_k, level0_top_k=2048, level1_top_k=2048 * 3,
-        default_top_p=top_p, level0_top_p=1.0, level1_top_p=1.0,
-    )
-    logits_processor = LogitsProcessorList([logit_processor])
-
+    # --- MLLM Generation ---’
     gen_kwargs = dict(
-        pad_token_id=pad_token_ids,
+        pad_token_id=processor.tokenizer.pad_token_id,
         do_sample=True if temperature > 0 else False,  # Controlled by dynamic sampler now, but keep flag
         temperature=temperature,
         top_k=top_k,
         top_p=top_p,
         max_new_tokens=max_new_tokens,
         use_cache=True,
-        eos_token_id=eval_model.tokenizer.eos_token_id,
-        logits_processor=logits_processor,
+        eos_token_id=processor.tokenizer.eos_token_id  # Ensure EOS token is set
     )
-
     logging.info(f"==== request kwargs====\n{gen_kwargs}")
 
     if max_new_tokens < 1:
@@ -300,10 +307,10 @@ def http_chat_bot(state, temperature, top_k, top_p, max_new_tokens):
 
     # Stream output
     try:
-        for generated_text in stream_response(eval_model.mllm_model, inputs, streamer, prompt, gen_kwargs):
+        for generated_text in stream_response(model, inputs, streamer, prompt, gen_kwargs):
             output = generated_text[len(prompt):].strip()
             state.messages[-1][-1] = output
-            yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 2
+            yield (state, state.to_gradio_chatbot()) + (enable_btn,) * 2
     except Exception as e:
         os.system("nvidia-smi")
         logging.info(traceback.print_exc())
@@ -312,9 +319,10 @@ def http_chat_bot(state, temperature, top_k, top_p, max_new_tokens):
     return (state, state.to_gradio_chatbot()) + (enable_btn,) * 2
 
 
-def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
+def http_gen_edit_bot(state, temperature, top_k, top_p,
+                      image_gen_temperature, image_gen_top_k, image_gen_top_p, max_output_tokens,
                       llm_cfg_scale, resolution_wh, use_diffusion, diffusion_cfg_scale, diffusion_num_inference_steps):
-    global eval_model, args  # Use global model and args
+    global model, args  # Use global model and args
     logging.info("http_gen_edit_bot.")
 
     if state.skip_next:
@@ -324,180 +332,137 @@ def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
 
     if len(state.messages) < 2:
         yield (state, state.to_gradio_chatbot()) + (enable_btn,) * 2
-
         return
 
     # --- Prepare Inputs for ILLUME ---
     # Get the full prompt from the conversation state
     all_images = state.get_images(return_pil=True)
 
-    # Add image token to text if not present
-    img_token = eval_model.config.model_args.get("image_token", DEFAULT_IMAGE_TOKEN)  # Get from config or use default
-
     # read resolution from user defined.
     h_str, w_str = resolution_wh.split('x')
     h_out, w_out = int(h_str), int(w_str)
+
     if use_diffusion:
         h_out, w_out = (h_out // 2, w_out // 2)
     else:
         h_out, w_out = (h_out, w_out)
-
-    # Calculate ratio tag based on base resolution from config
-    h_tag, w_tag = h_out, w_out
-    ratio_tag = f"<height_{h_tag}><width_{w_tag}>"
-    logging.info(f"Target Resolution: {h_out}x{w_out}, Ratio Tag: {ratio_tag}")
+    ratio_tag = f"<height_{h_out}><width_{w_out}>"
 
     input_state = state.copy()
 
     # prepare the text.
     original_image_sizes = None
-    if len(all_images):  # image editing.
-        # Use the process_images function from illume.mm_utils
-        # Ensure eval_model and its components are loaded
-
-        # process_images expects a list of PIL Images
-        # Ratios might be needed depending on your config - using None for default
+    if len(all_images):
+        # image editing.
         original_image_sizes = [image.size for image in all_images]
         logging.info(f"original_image_sizes: {original_image_sizes}")
-        images_tensor, image_sizes = process_images(
-            all_images,  # Pass as a list
-            eval_model.image_processor,
-            eval_model.mllm_model.config,
-            eval_model.config,
-            is_gen_task=True,  # Assuming this is correct for general use
-            ratios=DEFAULT_RESOLUTIONS  # Or get ratios based on UI selection if needed, # [(256, 256)]
+
+        all_images = [processor.transform_image_nearest_resolution_ratio(image) for image in all_images]
+
+        inputs = dict(
+            images=all_images
         )
 
-        w, h = image_sizes[0]
+        image_inputs = processor.image_processor(**inputs, return_tensors="pt")
+        image_inputs = image_inputs.to(model.device)
+
+        # overwrite the output resolution
+        h, w = image_inputs['pixel_values'].shape[-2:]
         ratio_tag = f"<height_{h}><width_{w}>"
         h_out, w_out = h, w
-        logging.info(f"Target Resolution: {h_out}x{w_out}, Ratio Tag: {ratio_tag}")
 
-        if isinstance(images_tensor, list):
-            logging.info(
-                f"Processed image. Tensor shape: {[img.shape for img in images_tensor]}, Size info: {image_sizes}")
-        else:
-            logging.info(f"Processed image. Tensor shape: {images_tensor.shape}, Size info: {image_sizes}")
-
-        unconditional_text = f"{ratio_tag}{img_token}\nReconstruct the image according to the given image\n"  # of {ratio_tag}
+        unconditional_text = f"{ratio_tag}{DEFAULT_IMAGE_TOKEN}\nReconstruct the image according to the given image\n"  # of {ratio_tag}
 
         instruction, img, image_process_type = input_state.messages[-2][-1]
-        print("instruction", instruction)
-        instruction = instruction.replace(img_token, '').lstrip("\n")
-        text = f"{ratio_tag}{img_token}\nPlease edit the image according to the instruction: {instruction}\n"
+        instruction = instruction.replace(DEFAULT_IMAGE_TOKEN, '').strip()
+        text = f"{ratio_tag}{DEFAULT_IMAGE_TOKEN}\nPlease edit the image according to the instruction: {instruction}\n"
         input_state.messages[-2][-1] = text, img, image_process_type
     else:
         # image generation
-        images_tensor = None
-        image_sizes = None
+        unconditional_text = f"Generate a random image of {ratio_tag}\n"
 
         text = input_state.messages[-2][-1]
         logging.info(f"Current text is {text}")
         text = f"Generate an image of {ratio_tag}, the content of image is {text}\n"
         input_state.messages[-2][-1] = text
-        logging.info(f"After padding. current text is {text}")
+        logging.info(f"After formatting. current text is {text}")
+        image_inputs = {}
 
-        unconditional_text = f"Generate a random image of {ratio_tag}\n"
-
+    # Calculate ratio tag based on base resolution from config
+    logging.info(f"Target Resolution: {h_out}x{w_out}, Ratio Tag: {ratio_tag}")
+    target_image_resolution = (h_out, w_out)
     prompt = input_state.get_prompt()
-    prompt += ratio_tag
     logging.info(f"Raw Prompt: {prompt}")
 
     # Tokenize the prompt
-    # Use tokenizer_image_token for potential image placeholder
-    input_ids_list = [tokenizer_image_token(prompt, eval_model.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt")]
-    pad_token_ids = eval_model.tokenizer.pad_token_id if eval_model.tokenizer.pad_token_id is not None else eval_model.tokenizer.eos_token_id
-    input_ids = pad_sequence(eval_model.tokenizer, input_ids_list, 
-                             batch_first=True, padding_value=pad_token_ids).to(eval_model.device)
-    attention_masks = input_ids.ne(pad_token_ids).to(eval_model.device)
-    logging.info(f"Input IDs shape: {input_ids.shape}")
-
-    # --- Prepare Logits Processors (Adapted from prepare_logit_processor) ---
-    logits_processor_list = []
-
-    # 1. CFG Logits Processor
-    if llm_cfg_scale > 1.0:
-        # Prepare unconditional prompt
-        # Use a fixed unconditional prompt or get from dataset/config if available
-
-        # Empty unconditional prompt common for generation
-        # empty prompt
-        conv_uncond = conv_templates[eval_model.config.model_args.version].copy()
-        conv_uncond.append_message(conv_uncond.roles[0], unconditional_text)
-        conv_uncond.append_message(conv_uncond.roles[1], None)
-        unconditional_prompt_str = conv_uncond.get_prompt() + ratio_tag  # Add ratio tag
-        print("unconditional_prompt_str", unconditional_prompt_str)
-        unconditional_input_ids = tokenizer_image_token(unconditional_prompt_str, eval_model.tokenizer,
-                                                        IMAGE_TOKEN_INDEX, return_tensors="pt")
-        unconditional_input_ids = unconditional_input_ids.repeat(input_ids.shape[0], 1)
-
-        # Pad unconditional prompt if needed to match batch size (1 in this case)
-        unconditional_input_ids = unconditional_input_ids.to(eval_model.device)
-
-        cfg_processor = CFGLogits(
-            guidance_scale=llm_cfg_scale,
-            uncond=unconditional_input_ids,
-            model=eval_model.mllm_model,
-            images=images_tensor,  # Pass input image if present
-            image_sizes=image_sizes
-        )
-        logits_processor_list.append(cfg_processor)
-        logging.info(f"Added CFGLogits with scale {llm_cfg_scale}")
-
-    # 2. Strict Image Token Processor (DualVQImageTokenProcessor)
-    token_nums, max_new_tokens, h1, w1, h2, w2 = calculate_image_token_num(h_out, w_out)
-
-    global special_tokens_dict
-    special_tokens_dict['start_of_vision_answer'] = eval_model.tokenizer.encode('<answer>')
-    image_token_processor = DualVQImageTokenProcessor(
-        level0_range=level0_range,
-        level1_range=level1_range,
-        num_level0_rows=h1,
-        num_level0_tokens=w1,
-        num_level1_rows=h2,
-        num_level1_tokens=w2,
-        special_tokens=special_tokens_dict  # Pass the whole dict
+    inputs = dict(
+        text=prompt + ratio_tag,
     )
-    logits_processor_list.append(image_token_processor)
-    logging.info("Added DualVQImageTokenProcessor")
 
-    # 3. Dynamic Sampling Processor
-    dynamic_sampling_processor = DynamicSamplingProcessor(
-        special_tokens=special_tokens_dict,
-        default_temp=0.7, level0_temp=temperature, level1_temp=temperature,
-        default_top_k=20, level0_top_k=top_k, level1_top_k=top_k * 3,  # As per your code
-        default_top_p=0.8, level0_top_p=top_p, level1_top_p=top_p,
+    inputs = processor(**inputs, return_tensors="pt")
+    inputs = inputs.to(model.device)
+    inputs.update(image_inputs)
+
+    conv_uncond = conv_templates[conv_templates_version].copy()
+    conv_uncond.append_message(conv_uncond.roles[0], unconditional_text)
+    conv_uncond.append_message(conv_uncond.roles[1], None)
+    unconditional_prompt_str = conv_uncond.get_prompt()  # Add ratio tag
+
+    print("unconditional_prompt_str", unconditional_prompt_str)
+
+    uncond_inputs = dict(
+        text=unconditional_prompt_str + ratio_tag,
+        images=all_images
     )
-    logits_processor_list.append(dynamic_sampling_processor)
-    logging.info(f"Added DynamicSamplingProcessor with temp={temperature}, top_k={top_k}, top_p={top_p}")
 
-    # Combine into LogitsProcessorList
-    final_logits_processor = LogitsProcessorList(logits_processor_list)
+    uncond_inputs = processor(**uncond_inputs, return_tensors="pt")
+    uncond_inputs = uncond_inputs.to(model.device)
+
+    logging.info(f"Input IDs shape: {inputs.input_ids.shape}")
 
     # Set initial response placeholder
     state.messages[-1][-1] = "image generating..."
     yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 2
 
+    gen_kwargs = dict(
+        max_new_tokens=2048,
+        do_sample=True if temperature > 0 else False,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+    )
+
+    image_gen_kwargs = dict(
+        negative_image_prompt_ids=uncond_inputs.input_ids,
+        negative_image_prompt_attention_mask=uncond_inputs.attention_mask,
+        target_image_resolution=target_image_resolution,
+        guidance_scale=llm_cfg_scale,
+        image_semantic_temperature=image_gen_temperature,
+        image_semantic_top_k=image_gen_top_k,
+        image_semantic_top_p=image_gen_top_p,
+        image_pixel_temperature=image_gen_temperature,
+        image_pixel_top_k=image_gen_top_k * 3,
+        image_pixel_top_p=image_gen_top_p,
+    )
+
     # --- MLLM Generation ---
     generated_image = None
     generated_text = ""
     try:
+        from transformers import set_seed
+        set_seed(42)
+
         with torch.inference_mode():  # Ensure no gradients are calculated
-            output_ids = eval_model.mllm_model.generate(
-                input_ids,
-                attention_mask=attention_masks,
-                images=images_tensor,  # Pass the processed input image tensor
-                image_sizes=image_sizes,  # Pass image sizes
-                pad_token_id=pad_token_ids,
-                do_sample=True if temperature > 0 else False,  # Controlled by dynamic sampler now, but keep flag
-                temperature=1.0,  # Set to 1.0 as dynamic sampler handles it
-                top_k=0,  # Set to 0 as dynamic sampler handles it
-                top_p=1.0,  # Set to 1.0 as dynamic sampler handles it
-                max_new_tokens=max_new_tokens,
-                logits_processor=final_logits_processor,  # Use the combined processor
+            output_ids = model.generate(
+                **inputs,
                 use_cache=True,
-                eos_token_id=eval_model.tokenizer.eos_token_id  # Ensure EOS token is set
+                **gen_kwargs,
+                **image_gen_kwargs,
+                pad_token_id = processor.tokenizer.pad_token_id,
+                eos_token_id = processor.tokenizer.eos_token_id,
             )
+
+            output_ids = output_ids[:, inputs['input_ids'].shape[1]:]
 
         logging.info(f"Generated output IDs shape: {output_ids.shape}")
 
@@ -505,21 +470,18 @@ def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
         # We need to decode the full output first to parse image tokens
         # output_ids shape is likely (batch_size, seq_len), batch_size=1 here
         generated_ids = output_ids[0]  # Get only generated tokens
-        full_output_text = eval_model.tokenizer.decode(
-            generated_ids, skip_special_tokens=True)  # Decode WITH special tokens first for parsing
+        full_output_text = processor.tokenizer.decode(generated_ids, skip_special_tokens=True)
         logging.info(f"Full decoded output: {full_output_text}")
 
         # --- Parse Output for Image Tokens and Text ---
         # Ensure levels are sorted and create the final list
-        num_levels = eval_model.config.model_args.get("vision_tokenizer_levels", 2)  # Get expected levels
-
-        generated_text, image_embed_inds_list, list_image_token_parts = parse_interleaved_text_image(full_output_text,
-                                                                                                     num_levels)
+        generated_text, image_embed_inds_list, list_image_token_parts = processor.parse_text_image(full_output_text,
+                                                                                                   DEFAULT_IMAGE_TOKEN)
 
         assert len(image_embed_inds_list) == 1, 'The number of generated image should be 1.'
         image_embed_inds = image_embed_inds_list[0]
-        logging.info(f"The generated text: {full_output_text}")
-        logging.info(f"Parsed generated text (image presents as <image>): {generated_text}")
+        # logging.info(f"The generated text: {full_output_text}")
+        logging.info(f"Parsed generated text (image presents as {DEFAULT_IMAGE_TOKEN}): {generated_text}")
 
         # Update chat with generated text first
         state.messages[-1][-1] = "vision tokenizer decoding..."  # Remove cursor
@@ -530,62 +492,31 @@ def http_gen_edit_bot(state, temperature, top_k, top_p, max_output_tokens,
             logging.info("Image tokens found. Attempting detokenization...")
             yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 2
 
-            # Check and pad/truncate token numbers
-            checked_embed_inds = check_image_token_num(image_embed_inds, token_nums, identifier="Bot")
-            if checked_embed_inds is None:
-                raise ValueError("Image token number mismatch during generation.")
-
-            semantic_code_list = [checked_embed_inds[0]]  # Batch size 1
-            texture_code_list = [checked_embed_inds[1]]  # Batch size 1
-
-            with torch.inference_mode() and torch.cuda.amp.autocast(dtype=eval_model.torch_dtype):
-                semantic_code = torch.as_tensor(semantic_code_list).to(eval_model.vq_device)
-                texture_code = torch.as_tensor(texture_code_list).to(eval_model.vq_device)
-
-                if use_diffusion:
-                    semantic_code = semantic_code.view(semantic_code.shape[0], h1, w1)
-                    texture_code = texture_code.view(texture_code.shape[0], h2, w2)
-
-                    diffusion_outputs = eval_model.diffusion_decoder_pipe(
-                        vq_indices=(semantic_code, texture_code),
-                        height=h_out * 2,  # Use target output height
-                        width=w_out * 2,  # Use target output width
-                        guidance_scale=diffusion_cfg_scale,
-                        num_inference_steps=diffusion_num_inference_steps  # Or make configurable
-                    )
-                    samples = diffusion_outputs.images  # List of PIL Images
-                    if samples:
-                        generated_image = samples[0]  # Get the first (only) image
-                    logging.info(
-                        f"Using Diffusion Decoder (cfg: {diffusion_cfg_scale}, steps: {diffusion_num_inference_steps}) Image size: {generated_image.size}")
-                else:
-                    semantic_code = semantic_code.view(semantic_code.shape[0], h1, w1)
-                    texture_code = texture_code.view(texture_code.shape[0], h2, w2)
-
-                    samples_tensor = eval_model.vq_model.decode_code(semantic_code, texture_code)
-
-                    # Convert tensor to PIL Image
-                    samples_tensor = torch.clamp(127.5 * samples_tensor + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu",
-                                                                                                                dtype=torch.uint8).numpy()
-                    assert samples_tensor.shape[0] == 1
-                    generated_image = Image.fromarray(samples_tensor[0])
-                    logging.info(f"Using VQ Tokenizer Decoder. Image size: {generated_image.size}")
+            samples = processor.decode_images(image_embed_inds_list, target_resolution=target_image_resolution,
+                                              use_diffusion=use_diffusion, diffusion_cfg_scale=diffusion_cfg_scale,
+                                              diffusion_num_inference_steps=diffusion_num_inference_steps)
+            generated_image = samples[0]
+            if use_diffusion:
+                logging.info(
+                    f"Using Diffusion Decoder (cfg: {diffusion_cfg_scale}, steps: {diffusion_num_inference_steps}) Image size: {generated_image.size}")
+            else:
+                logging.info(f"Using VQ Tokenizer Decoder. Image size: {generated_image.size}")
 
             if generated_image:
-                if original_image_sizes is not None and len(original_image_sizes) == 1:
-                    # editing task, unpad and resize image to original size
+                if original_image_sizes is not None and len(
+                        original_image_sizes) == 1:  # editing task, unpad and resize image to original size
                     original_size = original_image_sizes[0]
                     logging.info(f"original size: {original_size}. Output Image size: {generated_image.size}")
-                    generated_image = unpad_and_resize_back(generated_image, original_size[0], original_size[1])
+                    # generated_image = processor.unpad_and_resize_back(generated_image, original_size[0], original_size[1])
                     logging.info(f"final image size: {generated_image.size}")
                 logging.info("Image successfully generated.")
                 # <image> is placeholder.
-                state.messages[-1][-1] = ('<image>', [generated_image], list_image_token_parts)
-            else:
-                logging.error("Image generation failed or produced no output.")
-                state.messages[-1][-1] = "(Image generation failed)"
+
+            logging.info("Image successfully generated.")
+            # <image> is placeholder.
+            state.messages[-1][-1] = (DEFAULT_IMAGE_TOKEN, [generated_image], list_image_token_parts)
         else:
-            # No image tokens generated or no decoder enabled
+            # No image tokens generated
             state.messages[-1][-1] = generated_text  # Final text without image
 
         # Final yield with potentially updated message (text + image)
@@ -636,24 +567,23 @@ title_markdown = """
     <h2 style="margin: 10px 0;">
       <a href="https://arxiv.org/abs/2504.01934" target="_blank" rel="noopener noreferrer">Paper</a> |
       <a href="https://github.com/illume-unified-mllm/ILLUME_plus" target="_blank" rel="noopener noreferrer">Code</a> |
-      <a href="https://huggingface.co/collections/ILLUME-MLLM/illume-models-683b3916f5af2d0a015b3477" target="_blank" rel="noopener noreferrer">Model</a> |
+      <a href="https://huggingface.co/illume-unified-mllm/ILLUME_plus" target="_blank" rel="noopener noreferrer">Model</a> |
       <a href="https://illume-unified-mllm.github.io/" target="_blank" rel="noopener noreferrer">Project Page</a>
     </h2>
     <ul style="margin: 20px 0; padding-left: 20px;">
       <li><strong>1.</strong> Enter text and/or upload an image.</li>
-      <li><strong>2.</strong> Click the 💬 <strong>Chat</strong> button for image inputted conversations</li>
-      <li><strong>3.</strong> Click the 🖼️ <strong>Generate</strong> for image generation and image editing.</li>
-      <li><strong>4.</strong> (Optional) Enable Diffusion Decoder for image super resolution decoding. 
-      <li><strong>5.</strong> Adjust generation parameters if needed. 
-        <br/><strong>💡 Tip 1:</strong> For better image generation quality, we recommend setting <code>temperature = 1.0</code>, <code>top_k = 2048</code>, <code>top_p = 1.0</code>, <code>llm_cfg = 2.0</code>.    
-        <br/><strong>💡 Tip 2:</strong> For better image editing quality, we recommend setting <code>temperature = 0.7</code>, <code>top_k = 512</code>, <code>top_p = 0.8</code>, <code>llm_cfg = 1.5</code>.
-        <br/><strong>💡 Tip 3:</strong> For diffusion decoder, CFG scale of 1.5 or 2.0 is enough.
+      <li><strong>2.</strong> Click the �� <strong>Chat</strong> button for image inputted conversations</li>
+      <li><strong>3.</strong> Click the ��️ <strong>Generate</strong> for image generation and image editing.</li>
+      <li><strong>4.</strong> (Optional) Enable Diffusion Decoder for image super resolution decoding.
+      <li><strong>5.</strong> Adjust generation parameters if needed.
+        <br/><strong>�� Tip 1:</strong> For better image generation quality, we recommend setting <code>temperature = 1.0</code>, <code>top_k = 2048</code>, <code>top_p = 1.0</code>, <code>llm_cfg = 2.0</code>.
+        <br/><strong>�� Tip 2:</strong> For better image editing quality, we recommend setting <code>temperature = 0.7</code>, <code>top_k = 512</code>, <code>top_p = 0.8</code>, <code>llm_cfg = 1.5</code>.
+        <br/><strong>�� Tip 3:</strong> For diffusion decoder, CFG scale of 1.5 or 2.0 is enough.
       </li>
     </ul>
   </div>
 </div>
 """
-
 
 learn_more_markdown = ("""
 ## Citation
@@ -668,8 +598,6 @@ learn_more_markdown = ("""
 """)
 
 block_css = """
-
-
 #buttons button {
     min-width: min(120px,100%);
 }
@@ -787,11 +715,11 @@ def build_demo(embed_mode):
                 with gr.Row():
                     textbox.render()
                 with gr.Row(elem_id="buttons") as button_row:
-                    chat_btn = gr.Button(value="💬 Chat", variant="primary")
-                    gen_btn = gr.Button(value="🖼️ Generate", variant="secondary")
+                    chat_btn = gr.Button(value="�� Chat", variant="primary")
+                    gen_btn = gr.Button(value="��️ Generate", variant="secondary")
                 with gr.Row(elem_id="additional-buttons") as button_row_additional:
-                    regenerate_btn = gr.Button(value="🔄 Regenerate", interactive=False)
-                    clear_btn = gr.Button(value="🗑️ Clear History", interactive=False)
+                    regenerate_btn = gr.Button(value="�� Regenerate", interactive=False)
+                    clear_btn = gr.Button(value="��️ Clear History", interactive=False)
 
         # Update examples for ILLUME
         with gr.Accordion("Examples (Click to Load)", open=True):
@@ -802,7 +730,7 @@ def build_demo(embed_mode):
                     ["../configs/data_configs/test_data_examples/ImageUnderstandingExample/images/2.png",
                      "Depict the image in detail."],
                     ["../configs/data_configs/test_data_examples/ImageUnderstandingExample/images/3.png",
-                     "Parse the table"],
+                     "parse the table"],
                 ], inputs=[imagebox, textbox], label='Image Understanding Examples')
 
                 gr.Examples(examples=[
@@ -810,23 +738,23 @@ def build_demo(embed_mode):
                     [None, "a smiling child."],
                     [None, "tiger cub playing with soccer ball"],
                     [None, "screenshot from a 16 bit platform game in a lush green landscape"],
-                    [None, "Old car in kandy sri lanka, lake road,flower, bright, sunny, orange sky."],
+                    [None, "Old car in kandy sri lanka,lake road,flower, bright, sunny, orange sky"],
                     [None, "Create a vibrant painting of a tropical beach at sunset."],
                 ], inputs=[imagebox, textbox], label='Image Generation Examples')
 
                 gr.Examples(examples=[
                     ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/0.jpg",
                      "Change the color of the boots to a deep forest green"],
+                    ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/1.jpg",
+                     "Add a hat on the dog"],
                     ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/2.jpg",
                      "Remove the dried flowers"],
                     ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/3.jpg",
                      "Change it into winter"],
                     ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/4.jpg",
-                     "Delete the tennis racket from the man's hand"],
+                     "Delete the tennis racket from the man’s hand"],
                     ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/5.jpg",
                      "Show me this as it would appear in a comic book"],
-                    ["../configs/data_configs/test_data_examples/EditingSingleTurnExample/images/1.jpg",
-                     "Add a hat on the dog"],
                 ], inputs=[imagebox, textbox], label='Image Editing Examples')
 
         if not embed_mode:
@@ -835,7 +763,8 @@ def build_demo(embed_mode):
         # Register listeners
         btn_list = [regenerate_btn, clear_btn]
         parameter_chat_inputs = [temperature, top_k, top_p, max_output_tokens]
-        parameter_gen_edit_inputs = [image_gen_temperature, image_gen_top_k, image_gen_top_p, max_output_tokens,
+        parameter_gen_edit_inputs = [temperature, top_k, top_p,
+                                     image_gen_temperature, image_gen_top_k, image_gen_top_p, max_output_tokens,
                                      llm_cfg_scale, resolution_wh_dropdown,
                                      use_diffusion_checkbox, diffusion_cfg_scale, diffusion_num_inference_steps]
 
@@ -911,19 +840,16 @@ def build_demo(embed_mode):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # --- Add arguments for ILLUME configs and checkpoints ---
-    parser.add_argument("--model_name", type=str, default="ILLUME", help="Name for builder.")
-    parser.add_argument("--config", type=str, required=True, help="Path to MLLM config file (e.g., config.py).")
+    parser.add_argument("--model_name", type=str, default="illume-unified-mllm/illume_plus-qwen-2_5-3b-hf",
+                        help="Name for builder.")
     parser.add_argument("--torch_dtype", type=str, default='fp32', choices=['fp32', 'bf16', 'fp16'],
                         help="Computation data type.")
 
-    # Add diffusion/tokenizer version names if needed by builder, or read from config
-    parser.add_argument("--diffusion_decoder_path", type=str, default='/path/to/dualvitok_sdxl_decoder',
-                        help="Path to Diffusion Decoder checkpoint. Required if using diffusion.")
+    parser.add_argument("--diffusion_decoder_path", type=str, default='illume-unified-mllm/dualvitok_sdxl_decoder.pt',
+                        help="Path to Diffusion Decoder checkpoint (.pt). Required if using diffusion.")
 
-    parser.add_argument("--tokenizer_config", type=str, required=True,
+    parser.add_argument("--tokenizer_path", type=str, default='illume-unified-mllm/dualvitok',
                         help="Path to Tokenizer config file (e.g., tokenizer_config.py).")
-    parser.add_argument("--tokenizer_checkpoint", type=str, default=None,
-                        help="Path to VQ Tokenizer checkpoint (.pth).")
 
     # --- End ILLUME arguments ---
     parser.add_argument("--share", action="store_true", help="Create a public Gradio share link")
@@ -933,6 +859,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # --- Model Loading ---
+    # --- Model Loading ---set
     # Set device
     if "cuda" in args.device and torch.cuda.is_available():
         device = args.device
@@ -943,75 +870,60 @@ if __name__ == "__main__":
         local_rank = -1  # Indicate CPU
     logging.info(f"Using device: {device}")
 
-    # Prepare eval_model_cfg dictionary from args
-    eval_model_cfg = dict(
-        type=args.model_name,
-        config=args.config,
-        tokenizer_config=args.tokenizer_config,
-        diffusion_decoder_path=args.diffusion_decoder_path,
-        tokenizer_checkpoint=args.tokenizer_checkpoint,
-        torch_dtype=args.torch_dtype
-        # Add other necessary fields expected by your builder if any
-    )
+    args.torch_dtype = dict(fp16=torch.float16, fp32=torch.float32, bf16=torch.bfloat16)[args.torch_dtype]
+
+    num_gpus = torch.cuda.device_count()
+    logging.info(f"Detected {num_gpus} CUDA devices.")
+    # Determine device assignments
+    if num_gpus >= 3:
+        # Assign to separate GPUs if we have at least 3
+        mllm_device = torch.device('cuda:0')
+        vq_device = torch.device('cuda:1')
+        diffusion_device = torch.device('cuda:2')
+        logging.info("Assigning models: MLLM -> cuda:0, VQ -> cuda:1, Diffusion -> cuda:2")
+    elif num_gpus == 2:
+        # Assign MLLM to GPU 0, VQ and Diffusion to GPU 1
+        mllm_device = torch.device('cuda:0')
+        vq_device = torch.device('cuda:1')
+        diffusion_device = torch.device('cuda:1')
+        logging.info("Assigning models: MLLM -> cuda:0, VQ & Diffusion -> cuda:1")
+    elif num_gpus == 1:
+        # Assign all to the single available GPU
+        mllm_device = torch.device('cuda:0')
+        vq_device = torch.device('cuda:0')
+        diffusion_device = torch.device('cuda:0')
+        logging.info("Assigning all models to cuda:0")
+    else:
+        # Fallback to CPU if no GPUs are available
+        mllm_device = torch.device('cpu')
+        vq_device = torch.device('cpu')
+        diffusion_device = torch.device('cpu')
+        logging.info("Warning: No CUDA devices found. Assigning all models to CPU.")
 
     # Build the ILLUME model instance
     logging.info("Building ILLUME model...")
-    try:
-        # Pass device info to the builder if it accepts it, otherwise models are moved later
-        # Add device=device, local_rank=local_rank if builder supports them
-        eval_model = build_eval_model(eval_model_cfg)
+    # prepare models and processors
+    model = AutoModel.from_pretrained(
+        args.model_name,
+        attn_implementation='flash_attention_2',  # OR 'sdpa' for Ascend NPUs
+        torch_dtype=args.torch_dtype,
+        low_cpu_mem_usage=True,
+        trust_remote_code=True).eval().to(args.torch_dtype).cuda()
+    processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
 
-        num_gpus = torch.cuda.device_count()
-        logging.info(f"Detected {num_gpus} CUDA devices.")
-        # Determine device assignments
-        if num_gpus >= 3:
-            # Assign to separate GPUs if we have at least 3
-            mllm_device = torch.device('cuda:0')
-            vq_device = torch.device('cuda:1')
-            diffusion_device = torch.device('cuda:2')
-            logging.info("Assigning models: MLLM -> cuda:0, VQ -> cuda:1, Diffusion -> cuda:2")
-        elif num_gpus == 2:
-            # Assign MLLM to GPU 0, VQ and Diffusion to GPU 1
-            mllm_device = torch.device('cuda:0')
-            vq_device = torch.device('cuda:1')
-            diffusion_device = torch.device('cuda:1')
-            logging.info("Assigning models: MLLM -> cuda:0, VQ & Diffusion -> cuda:1")
-        elif num_gpus == 1:
-            # Assign all to the single available GPU
-            mllm_device = torch.device('cuda:0')
-            vq_device = torch.device('cuda:0')
-            diffusion_device = torch.device('cuda:0')
-            logging.info("Assigning all models to cuda:0")
-        else:
-            # Fallback to CPU if no GPUs are available
-            mllm_device = torch.device('cpu')
-            vq_device = torch.device('cpu')
-            diffusion_device = torch.device('cpu')
-            logging.info("Warning: No CUDA devices found. Assigning all models to CPU.")
+    # set the vision tokenizer for decoding image.
+    dualvitok = AutoModel.from_pretrained(args.tokenizer_path,
+                                          torch_dtype=args.torch_dtype,
+                                          trust_remote_code=True).eval().to(vq_device)
+    processor.set_vision_tokenizer(dualvitok)
 
-        # Manually move components to device if not handled by builder/load_pretrained_model
-        if hasattr(eval_model, 'mllm_model') and eval_model.mllm_model:
-            eval_model.mllm_model.to(mllm_device)
-        if hasattr(eval_model, 'vq_model') and eval_model.vq_model:
-            eval_model.vq_model.to(vq_device)
-        if hasattr(eval_model, 'diffusion_decoder_pipe') and eval_model.diffusion_decoder_pipe:
-            eval_model.diffusion_decoder_pipe.to(diffusion_device)  # Move the whole pipeline
+    # (Optional): set the sdxl diffusion decoder. It will enable upsample 2x image resolution.
+    processor.load_diffusion_vision_detokenizer(args.diffusion_decoder_path, device=diffusion_device)
 
-        # Assign device to eval_model for later use
-        eval_model.device = device
-        eval_model.mllm_device = mllm_device
-        eval_model.vq_device = vq_device
-        eval_model.diffusion_device = diffusion_device
-        eval_model.local_rank = local_rank
+    # Assign device to model for later use
+    streamer = TextIteratorStreamer(processor.tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=15)
 
-        streamer = TextIteratorStreamer(eval_model.tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=15)
-
-        logging.info("ILLUME model built successfully.")
-
-    except Exception as e:
-        logging.error(f"Failed to build ILLUME model: {e}\n{traceback.format_exc()}")
-        print("Error: Model loading failed. Please check config paths, checkpoints, and dependencies.")
-        exit(1)  # Exit if model loading fails
+    logging.info("ILLUME model built successfully.")
 
     demo = build_demo(args.embed)
     demo.queue(

@@ -204,7 +204,7 @@ ln -s $(pwd)/../checkpoints/illume_plus-qwen2_5-3b $(pwd)/logdir/illume_plus_3b/
 python app.py --config ../configs/example/illume_plus_3b/illume_plus_qwen2_5_3b_stage3.py  \
   --tokenizer_config ../configs/example/dualvitok/dualvitok_anyres_max512.py \
   --tokenizer_checkpoint ../checkpoints/dualvitok/pytorch_model.bin \
-  --diffusion_decoder_path ../checkpoints/dualvitok_sdxl_decoder \
+  --diffusion_decoder_path ../checkpoints/dualvitok-sdxl-decoder \
   --torch_dtype=bf16
 ```
 
@@ -219,7 +219,7 @@ Note that we implement [InterleavedLogitsProcessor](ILLUME/generation_eval/model
 cd vision_tokenizer
 
 python app.py ../configs/example/dualvitok/dualvitok_anyres_max512.py \
-  --vq-ckpt=../checkpoints/dualvitok/pytorch_model.bin \
+  --vq-ckpt ../checkpoints/dualvitok/pytorch_model.bin \
   --sdxl-decoder-path ../checkpoints/dualvitok-sdxl-decoder
 ```
 
